@@ -11,126 +11,183 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
-// ShoppingList represents a list of items
-type ShoppingList struct {
-	items []string
-	curr  int
+const (
+	bunchSize = 10
+)
 
-	mu *sync.Mutex
+// ItemStorager represents storage for items
+type ItemStorager interface {
+	// Add adds item into particular chatID bucket
+	Add(chatID int64, item string)
+	// Wipe removes all items for particular Chat
+	Wipe(chatID int64)
+	// GetAll return collection of bunches (size <= 10, because tg Poll could contain only <= 10 option)
+	// with items. As long, as I use tg Polls to show lists it should be so. ¯\_(ツ)_/¯
+	GetAll(chatID int64) [][]string
 }
 
-// Next returns item from ShoppingList if it's possible
-func (l *ShoppingList) Next() (string, bool) {
-	if l.curr > len(l.items)-1 {
-		l.curr = 0
-		return "", false
-	}
-	l.curr++
-	return l.items[l.curr-1], true
+// Srv is runnable instance if shopping list
+type Srv struct {
+	db  ItemStorager
+	bot *tele.Bot
 }
 
-// Add parses and adds items in ShoppingList
-func (l *ShoppingList) Add(text string) int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+// NewServer takes ItemStorager and tele.Bot and initializes all handlers
+func NewServer(db ItemStorager, b *tele.Bot) *Srv {
+	const (
+		addCmd  = "/add"
+		listCmd = "/list"
+		wipeCmd = "/wipe"
+	)
 
-	var count int
-	rows := strings.Split(text, "\n")
-	for _, r := range rows {
-		var xs []string
-		for _, x := range strings.Split(r, ",") {
-			x = strings.TrimSpace(x)
-			if x != "" {
-				xs = append(xs, x)
-				count++
-			}
-		}
-		l.items = append(l.items, xs...)
-	}
-	return count
-}
+	b.Handle(listCmd, func(c tele.Context) error {
+		items := db.GetAll(c.Message().Chat.ID)
 
-// Wipe removes all items from ShoppingList
-func (l *ShoppingList) Wipe() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	l.curr = 0
-	l.items = []string{}
-}
-
-// Len return amount of items in ShoppingList
-func (l *ShoppingList) Len() int {
-	return len(l.items)
-}
-
-func main() {
-	pref := tele.Settings{
-		Token:  os.Getenv("SCBOT_TG_TOKEN"),
-		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
-	}
-
-	b, err := tele.NewBot(pref)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-
-	// Init
-	list := ShoppingList{mu: &sync.Mutex{}}
-
-	// Commands
-	b.Handle("/list", func(c tele.Context) error {
-		if list.Len() == 0 {
+		if len(items) == 0 {
 			return c.Send("Список пуст")
 		}
 
-		if list.Len() == 1 {
-			return c.Send("Один пункт ты и так запомнишь")
+		// we should do it because Tg Polls can't have less than two options
+		if len(items) == 1 && len(items[0]) == 1 {
+			return c.Send(fmt.Sprintf("В списке пока только один пункт: %s", items[0][0]))
 		}
 
-		pages := len(list.items)/10 + 1
-		page := 1
-		var ps []*tele.Poll
-		p := &tele.Poll{
-			Type:            tele.PollRegular,
-			MultipleAnswers: true,
-			Question:        fmt.Sprintf("Страница %d/%d", 1, pages),
-		}
+		var polls []*tele.Poll
 
-		for item, ok := list.Next(); ok; item, ok = list.Next() {
-			if len(p.Options) == 10 {
-				page++
-				ps = append(ps, p)
-				p = &tele.Poll{
-					Type:            tele.PollRegular,
-					MultipleAnswers: true,
-					Question:        fmt.Sprintf("Страница %d/%d", page, pages),
-				}
+		for page, group := range items {
+			p := &tele.Poll{
+				Type:            tele.PollRegular,
+				MultipleAnswers: true,
+				Question:        fmt.Sprintf("Список покупок, страница: %d/%d", page+1, len(items)),
 			}
-			p.AddOptions(item)
+			for _, item := range group {
+				p.AddOptions(item)
+			}
+			polls = append(polls, p)
 		}
-		ps = append(ps, p)
 
-		for _, p := range ps {
-			err = c.Send(p)
+		// sand all polls one by one back to tg
+		for _, p := range polls {
+			err := c.Send(p)
 			if err != nil {
-				return err
+				return fmt.Errorf("can't send poll: %w", err)
 			}
 		}
 
 		return nil
 	})
 
-	b.Handle("/add", func(c tele.Context) error {
-		t := strings.TrimPrefix(c.Message().Text, "/add")
-		return c.Send(fmt.Sprintf("Добавлено %d позиций", list.Add(t)))
+	b.Handle(addCmd, func(c tele.Context) error {
+		text := strings.TrimPrefix(c.Message().Text, addCmd)
+		rows := strings.Split(text, "\n")
+		itemCount := 0
+		for _, r := range rows {
+			ws := strings.Split(r, ",")
+			for _, w := range ws {
+				item := strings.TrimSpace(w)
+				if item != "" {
+					db.Add(c.Message().Chat.ID, item)
+					itemCount++
+				}
+			}
+		}
+		return c.Send(fmt.Sprintf("Добавлено %d пунктов", itemCount))
 	})
 
-	b.Handle("/clean", func(c tele.Context) error {
-		list.Wipe()
+	b.Handle(wipeCmd, func(c tele.Context) error {
+		db.Wipe(c.Message().Chat.ID)
 		return c.Send("Список теперь пуст")
 	})
 
-	b.Start()
+	return &Srv{
+		db:  db,
+		bot: b,
+	}
+}
+
+// Run stars a Srv
+func (s *Srv) Run() error {
+	s.bot.Start()
+	return nil
+}
+
+// Inmem is in-memory implementation of ItemStorager
+type Inmem struct {
+	items map[int64][]string
+
+	mu *sync.Mutex
+}
+
+// todo: do something with Add, Wipe, GetAll comments
+var _ ItemStorager = (*Inmem)(nil)
+
+//nolint:revive // see interface docs
+func (db *Inmem) Add(chatID int64, item string) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	db.items[chatID] = append(db.items[chatID], item)
+}
+
+//nolint:revive // see interface docs
+func (db *Inmem) Wipe(chatID int64) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	delete(db.items, chatID)
+}
+
+//nolint:revive // see interface docs
+func (db *Inmem) GetAll(chatID int64) [][]string {
+	if items, ok := db.items[chatID]; !ok || len(items) == 0 {
+		return nil
+	}
+
+	var (
+		items [][]string
+		loc   []string
+	)
+
+	for i := 0; i < len(db.items[chatID]); i++ {
+		if len(loc) == bunchSize {
+			items = append(items, loc)
+			loc = []string{}
+		}
+		loc = append(loc, db.items[chatID][i])
+	}
+	items = append(items, loc)
+
+	return items
+}
+
+func makeBot(timeOut time.Duration) (*tele.Bot, error) {
+	pref := tele.Settings{
+		Token:  os.Getenv("SCBOT_TG_TOKEN"),
+		Poller: &tele.LongPoller{Timeout: timeOut},
+	}
+
+	b, err := tele.NewBot(pref)
+	if err != nil {
+		return nil, fmt.Errorf("can't create a bot: %w", err)
+	}
+	return b, nil
+}
+
+func makeInmemStore() *Inmem {
+	return &Inmem{
+		items: make(map[int64][]string),
+		mu:    &sync.Mutex{},
+	}
+}
+
+func main() {
+	b, err := makeBot(10 * time.Second)
+	if err != nil {
+		log.Fatal(err)
+	}
+	db := makeInmemStore()
+	srv := NewServer(db, b)
+
+	// todo: catch SIGTERM to commit data to disk before shutdown
+	if err := srv.Run(); err != nil {
+		log.Fatal(err)
+	}
 }
