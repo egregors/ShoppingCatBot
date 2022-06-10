@@ -7,13 +7,13 @@ GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/ | grep -v _test.go)
 
 all: run
 
-run:  ## Run dev
+run:  ## Run local dev version
 	@go run main.go
 
-lint:  ## Lint the files
+lint:  ## Lint all the stuff
 	@golangci-lint run --config .golangci.yml ./...
 
-docker:  ## Build Docker image
+docker:  ## Build docker image
 	@docker build -t scbot .
 
 ## Help

@@ -19,8 +19,8 @@ const (
 type ItemStorager interface {
 	// Add adds item into particular chatID bucket
 	Add(chatID int64, item string)
-	// Wipe removes all items for particular Chat
-	Wipe(chatID int64)
+	// Remove deletes item from particular chatID bucket if it exist
+	Remove(chatID int64, item string)
 	// GetAll return collection of bunches (size <= 10, because tg Poll could contain only <= 10 option)
 	// with items. As long, as I use tg Polls to show lists it should be so. ¯\_(ツ)_/¯
 	GetAll(chatID int64) [][]string
@@ -28,8 +28,9 @@ type ItemStorager interface {
 
 // Srv is runnable instance if shopping list
 type Srv struct {
-	db  ItemStorager
-	bot *tele.Bot
+	db        ItemStorager
+	bot       *tele.Bot
+	currLists []*tele.Message
 }
 
 // NewServer takes ItemStorager and tele.Bot and initializes all handlers
@@ -37,8 +38,13 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 	const (
 		addCmd  = "/add"
 		listCmd = "/list"
-		wipeCmd = "/wipe"
+		doneCmd = "/done"
 	)
+
+	srv := &Srv{
+		db:  db,
+		bot: b,
+	}
 
 	b.Handle(listCmd, func(c tele.Context) error {
 		items := db.GetAll(c.Message().Chat.ID)
@@ -68,11 +74,32 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 
 		// sand all polls one by one back to tg
 		for _, p := range polls {
-			err := c.Send(p)
+
+			msg, err := c.Bot().Send(c.Recipient(), p)
+			srv.currLists = append(srv.currLists, msg)
+
 			if err != nil {
 				return fmt.Errorf("can't send poll: %w", err)
 			}
 		}
+
+		return c.Send(doneCmd)
+	})
+
+	b.Handle(doneCmd, func(c tele.Context) error {
+		for _, l := range srv.currLists {
+			p, err := c.Bot().StopPoll(l)
+			for _, o := range p.Options {
+				if o.VoterCount != 0 {
+					srv.db.Remove(c.Chat().ID, o.Text)
+				}
+			}
+			if err != nil {
+				return fmt.Errorf("can't stop poll: %w", err)
+			}
+		}
+
+		srv.currLists = nil
 
 		return nil
 	})
@@ -94,15 +121,7 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 		return c.Send(fmt.Sprintf("Добавлено %d пунктов", itemCount))
 	})
 
-	b.Handle(wipeCmd, func(c tele.Context) error {
-		db.Wipe(c.Message().Chat.ID)
-		return c.Send("Список теперь пуст")
-	})
-
-	return &Srv{
-		db:  db,
-		bot: b,
-	}
+	return srv
 }
 
 // Run stars a Srv
@@ -118,24 +137,29 @@ type Inmem struct {
 	mu *sync.Mutex
 }
 
-// todo: do something with Add, Wipe, GetAll comments
 var _ ItemStorager = (*Inmem)(nil)
 
-//nolint:revive // see interface docs
+// Add adds item into the map in chatID key
 func (db *Inmem) Add(chatID int64, item string) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	db.items[chatID] = append(db.items[chatID], item)
 }
 
-//nolint:revive // see interface docs
-func (db *Inmem) Wipe(chatID int64) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	delete(db.items, chatID)
+// Remove removes item from chat key
+func (db *Inmem) Remove(chatID int64, item string) {
+	// todo: ya ya, it's full scan now, but who cares until you have 999k shopping list?
+	if l, ok := db.items[chatID]; ok {
+		for i := 0; i < len(l); i++ {
+			if l[i] == item {
+				db.items[chatID] = append(l[:i], l[i+1:]...)
+				return
+			}
+		}
+	}
 }
 
-//nolint:revive // see interface docs
+// GetAll return bunches of items from key chatID
 func (db *Inmem) GetAll(chatID int64) [][]string {
 	if items, ok := db.items[chatID]; !ok || len(items) == 0 {
 		return nil
@@ -154,6 +178,11 @@ func (db *Inmem) GetAll(chatID int64) [][]string {
 		loc = append(loc, db.items[chatID][i])
 	}
 	items = append(items, loc)
+
+	// fixme: as we know, tg can sand polls only with 1 < n < 11 options.
+	//  so, in case when we got 11 options we can't make one 10-options and one 1-options polls.
+	//  in this situation we need to take one option from 10-options poll and put it into
+	//  1-option poll.
 
 	return items
 }
@@ -186,6 +215,7 @@ func main() {
 	db := makeInmemStore()
 	srv := NewServer(db, b)
 
+	fmt.Println("Shopping Cat ~=~=~=~=~=~=~=~=~=~=~=~=~=[,,_,,]:3")
 	// todo: catch SIGTERM to commit data to disk before shutdown
 	if err := srv.Run(); err != nil {
 		log.Fatal(err)
