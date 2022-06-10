@@ -179,10 +179,17 @@ func (db *Inmem) GetAll(chatID int64) [][]string {
 	}
 	items = append(items, loc)
 
-	// fixme: as we know, tg can sand polls only with 1 < n < 11 options.
-	//  so, in case when we got 11 options we can't make one 10-options and one 1-options polls.
-	//  in this situation we need to take one option from 10-options poll and put it into
-	//  1-option poll.
+	// tg can send polls only with 1 < n < 11 options.
+	// so, if we got { {10}, {1} } polls, we can't send the second ones.
+	// to avoid it we move last items of pre last bunch to last bunch
+	if len(items) > 1 && len(items[len(items)-1]) == 1 {
+		last := items[len(items)-1]
+		pred := items[len(items)-2]
+		last = append(last, pred[len(pred)-1])
+		pred = append(pred[:len(pred)-1], pred[len(pred):]...)
+		items[len(items)-1] = last
+		items[len(items)-2] = pred
+	}
 
 	return items
 }

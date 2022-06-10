@@ -21,6 +21,9 @@ jobs:
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v3.2.0
 
+    - name: Run tests
+      run: go test -v ./...
+
     - name: Publish to Registry
       uses: elgohr/Publish-Docker-Github-Action@master
       with:

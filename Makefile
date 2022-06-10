@@ -13,6 +13,9 @@ run:  ## Run local dev version
 lint:  ## Lint all the stuff
 	@golangci-lint run --config .golangci.yml ./...
 
+test:  ## Run tests
+	@go test ./...
+
 docker:  ## Build docker image
 	@docker build -t scbot .
 
