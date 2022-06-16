@@ -3,12 +3,15 @@ PKG := "github.com/egregors/$(PROJECT_NAME)"
 PKG_LIST := $(shell go list ${PKG}/... | grep -v /vendor/)
 GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/ | grep -v _test.go)
 
-.PHONY: all lint docker
+.PHONY: all lint docker drun
 
 all: run
 
 run:  ## Run local dev version
 	@go run main.go
+
+drun:	## Run in docker
+	@docker run --rm -v /tmp/dumps:/dumps -it -e SCBOT_TG_TOKEN scbot
 
 lint:  ## Lint all the stuff
 	@golangci-lint run --config .golangci.yml ./...

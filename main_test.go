@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -56,6 +57,79 @@ func TestInmem_GetAll(t *testing.T) {
 			}
 			if got := db.GetAll(tt.args.chatID); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("GetAll() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInmem_Dump(t *testing.T) {
+	_ = os.Mkdir("dumps", os.ModePerm)
+
+	type fields struct {
+		items map[int64][]string
+		mu    *sync.Mutex
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		wantErr bool
+	}{
+		{
+			"valid dump",
+			fields{
+				items: map[int64][]string{0: {"1", "2", "3"}, 1: {"4", "5"}},
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := &Inmem{
+				items: tt.fields.items,
+				mu:    tt.fields.mu,
+			}
+			if err := db.Dump(); (err != nil) != tt.wantErr {
+				t.Errorf("Dump() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestInmem_Restore(t *testing.T) {
+	_ = os.Mkdir("dumps", 0o600)
+	defer func() {
+		_ = os.Remove("dumps/items.gob")
+		_ = os.Remove("dumps")
+	}()
+
+	type fields struct {
+		items map[int64][]string
+		mu    *sync.Mutex
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		wantErr bool
+	}{
+		{
+			"valid dump",
+			fields{
+				items: map[int64][]string{0: {"1", "2", "3"}, 1: {"4", "5"}},
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := &Inmem{
+				items: tt.fields.items,
+				mu:    tt.fields.mu,
+			}
+			_ = db.Dump()
+			newDB := &Inmem{items: make(map[int64][]string)}
+			if err := newDB.Restore(); (err != nil) != tt.wantErr {
+				t.Errorf("Restore() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("New DB items = %v, want = %v", newDB.items, db.items)
 			}
 		})
 	}

@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	tele "gopkg.in/telebot.v3"
@@ -24,6 +28,9 @@ type ItemStorager interface {
 	// GetAll return collection of bunches (size <= 10, because tg Poll could contain only <= 10 option)
 	// with items. As long, as I use tg Polls to show lists it should be so. ¯\_(ツ)_/¯
 	GetAll(chatID int64) [][]string
+
+	Dump() error
+	Restore() error
 }
 
 // Srv is runnable instance if shopping list
@@ -194,6 +201,41 @@ func (db *Inmem) GetAll(chatID int64) [][]string {
 	return items
 }
 
+// Dump saves on disk current items in bin format
+func (db *Inmem) Dump() error {
+	buf := new(bytes.Buffer)
+	encoder := gob.NewEncoder(buf)
+
+	err := encoder.Encode(db.items)
+	if err != nil {
+		return fmt.Errorf("can't encode items: %w", err)
+	}
+	err = os.WriteFile("dumps/items.gob", buf.Bytes(), 0o600)
+	if err != nil {
+		return fmt.Errorf("can't save dump: %w", err)
+	}
+
+	return nil
+}
+
+// Restore reads dump from disk and populates items
+func (db *Inmem) Restore() error {
+	f, err := os.ReadFile("dumps/items.gob")
+	if err != nil {
+		return fmt.Errorf("can't read dump: %w", err)
+	}
+
+	buf := bytes.NewBuffer(f)
+	decoder := gob.NewDecoder(buf)
+
+	err = decoder.Decode(&db.items)
+	if err != nil {
+		return fmt.Errorf("can't decode items: %w", err)
+	}
+
+	return nil
+}
+
 func makeBot(timeOut time.Duration) (*tele.Bot, error) {
 	pref := tele.Settings{
 		Token:  os.Getenv("SCBOT_TG_TOKEN"),
@@ -208,13 +250,20 @@ func makeBot(timeOut time.Duration) (*tele.Bot, error) {
 }
 
 func makeInmemStore() *Inmem {
-	return &Inmem{
+	db := &Inmem{
 		items: make(map[int64][]string),
 		mu:    &sync.Mutex{},
 	}
+	// trying restore from dump
+	if err := db.Restore(); err != nil {
+		fmt.Printf("can't restore: %s\n", err.Error())
+	}
+	return db
 }
 
 func main() {
+	fmt.Println("Shopping Cat ~=~=~=~=~=~=~=~=~=~=~=~=~=[,,_,,]:3")
+
 	b, err := makeBot(10 * time.Second)
 	if err != nil {
 		log.Fatal(err)
@@ -222,8 +271,19 @@ func main() {
 	db := makeInmemStore()
 	srv := NewServer(db, b)
 
-	fmt.Println("Shopping Cat ~=~=~=~=~=~=~=~=~=~=~=~=~=[,,_,,]:3")
-	// todo: catch SIGTERM to commit data to disk before shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-stop
+		fmt.Printf("Dumping...")
+		if err := srv.db.Dump(); err != nil {
+			fmt.Printf("FAIL\n %s", err.Error())
+			os.Exit(1)
+		}
+		fmt.Printf("done\n")
+		os.Exit(0)
+	}()
+
 	if err := srv.Run(); err != nil {
 		log.Fatal(err)
 	}

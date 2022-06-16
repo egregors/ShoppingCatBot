@@ -26,6 +26,8 @@ jobs:
 
     - name: Publish to Registry
       uses: elgohr/Publish-Docker-Github-Action@master
+      env:
+        DOCKER_BUILDKIT: 1
       with:
         name: egregors/ShoppingCatBot/scbot
         username: ${{ github.actor }}

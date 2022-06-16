@@ -30,7 +30,7 @@ To run your own server, just pull docker image, pass your Telegram token and run
 
 ```shell
 docker pull ghcr.io/egregors/shoppingcatbot/scbot:latest
-docker run -d -e SCBOT_TG_TOKEN="YOUR-TELEGRAM-BOT-TOKEN" ghcr.io/egregors/shoppingcatbot/scbot
+docker run --rm -d -v /tmp/dumps:/dumps -e SCBOT_TG_TOKEN="YOUR-TELEGRAM-BOT-TOKEN" ghcr.io/egregors/shoppingcatbot/scbot
 ```
 
 ## Development
