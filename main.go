@@ -57,12 +57,12 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 		items := db.GetAll(c.Message().Chat.ID)
 
 		if len(items) == 0 {
-			return c.Send("Список пуст")
+			return c.Send("List is empty")
 		}
 
 		// we should do it because Tg Polls can't have less than two options
 		if len(items) == 1 && len(items[0]) == 1 {
-			return c.Send(fmt.Sprintf("В списке пока только один пункт: %s", items[0][0]))
+			return c.Send(fmt.Sprintf("The only one item in the list: %s", items[0][0]))
 		}
 
 		var polls []*tele.Poll
@@ -71,7 +71,7 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 			p := &tele.Poll{
 				Type:            tele.PollRegular,
 				MultipleAnswers: true,
-				Question:        fmt.Sprintf("Список покупок, страница: %d/%d", page+1, len(items)),
+				Question:        fmt.Sprintf("Shopping list, page: %d/%d", page+1, len(items)),
 			}
 			for _, item := range group {
 				p.AddOptions(item)
@@ -125,7 +125,7 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 				}
 			}
 		}
-		return c.Send(fmt.Sprintf("Добавлено %d пунктов", itemCount))
+		return c.Send(fmt.Sprintf("Added %d item(s)", itemCount))
 	})
 
 	return srv
