@@ -20,7 +20,7 @@ Shopping list telegram Bot
 
 ## Screenshots
 
-[//]: # (TODO: add screenshots from an iPhone)
+<img width="1217" alt="Screenshot 2022-06-16 at 17 38 42" src="https://user-images.githubusercontent.com/2153895/174094944-376cd186-03b8-4cf9-8828-4d5256676e7c.png">
 
 ## Usage
 
