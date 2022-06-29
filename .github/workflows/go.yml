@@ -33,3 +33,10 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
         registry: ghcr.io
+
+    - name: Trigger deploy
+      env:
+        DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+      run: |
+        curl --fail --insecure --max-time 300 "https://$DEPLOY_HOST/deploy/scatb?secret=$DEPLOY_KEY"'&sync=true'
