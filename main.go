@@ -48,12 +48,7 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 		doneCmd = "/done"
 	)
 
-	srv := &Srv{
-		db:  db,
-		bot: b,
-	}
-
-	b.Handle(listCmd, func(c tele.Context) error {
+	showList := func(srv *Srv, c tele.Context) error {
 		items := db.GetAll(c.Message().Chat.ID)
 
 		if len(items) == 0 {
@@ -89,11 +84,10 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 				return fmt.Errorf("can't send poll: %w", err)
 			}
 		}
-
 		return c.Send(doneCmd)
-	})
+	}
 
-	b.Handle(doneCmd, func(c tele.Context) error {
+	setDone := func(srv *Srv, c tele.Context) error {
 		for _, l := range srv.currLists {
 			p, err := c.Bot().StopPoll(l)
 			for _, o := range p.Options {
@@ -105,13 +99,12 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 				return fmt.Errorf("can't stop poll: %w", err)
 			}
 		}
-
 		srv.currLists = nil
 
-		return nil
-	})
+		return showList(srv, c)
+	}
 
-	b.Handle(addCmd, func(c tele.Context) error {
+	addItems := func(srv *Srv, c tele.Context) error {
 		text := strings.TrimPrefix(c.Message().Text, addCmd)
 		rows := strings.Split(text, "\n")
 		itemCount := 0
@@ -126,6 +119,23 @@ func NewServer(db ItemStorager, b *tele.Bot) *Srv {
 			}
 		}
 		return c.Send(fmt.Sprintf("Added %d item(s)", itemCount))
+	}
+
+	srv := &Srv{
+		db:  db,
+		bot: b,
+	}
+
+	b.Handle(listCmd, func(c tele.Context) error {
+		return showList(srv, c)
+	})
+
+	b.Handle(doneCmd, func(c tele.Context) error {
+		return setDone(srv, c)
+	})
+
+	b.Handle(addCmd, func(c tele.Context) error {
+		return addItems(srv, c)
 	})
 
 	return srv
